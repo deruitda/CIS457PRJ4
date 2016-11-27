@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <limits.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <netinet/in.h>
@@ -19,48 +20,45 @@
 
 int main(int argc, char **argv)
 {
-        int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-        int port;
-        int clientsocket;
-		char filename[20];
-		FILE *fp;
-		
-        //get the port
-        printf("Enter a port: ");
-        scanf("%d", &port);
-        //server is specifying its own address
-        struct sockaddr_in serveraddr, clientaddr;
-        serveraddr.sin_family = AF_INET;
-        serveraddr.sin_port = htons(port);
-        serveraddr.sin_addr.s_addr = INADDR_ANY; //a catchall saying use any IP addr this computer has
+    int port;
+    char buf[LINE_MAX];
+    FILE *fp;
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
-        //Bind: Tie addr to socket saying when something is to be done with socket, use this addr
-        bind(sockfd, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
+    if(sockfd < 0)
+    {
+      printf("Error creating socket\n");
+      return 1;
+    }
 
-        //listens to specified socket
-        //10 is number of turns until we stop listening
-        listen(sockfd, 10);
+    //get the port
+    printf("Enter a port: ");
+    scanf("%d", &port);
+    //server is specifying its own address
+    struct sockaddr_in serveraddr, clientaddr;
+    serveraddr.sin_family = AF_INET;
+    serveraddr.sin_port = htons(port);
+    serveraddr.sin_addr.s_addr = INADDR_ANY; //a catchall saying use any IP addr this computer has
 
-        int len = sizeof(clientaddr);
+    //Bind: Tie addr to socket saying when something is to be done with socket, use this addr
+    if(bind(sockfd, (struct sockaddr*)&serveraddr, sizeof(serveraddr)) != 0)
+    {
+      fprintf(stderr, "Bind");
+      exit(1);
+    }
 
-        //Accept will fill in client addr struct
-        //Accept is a blocking call
-		//clientsocket = accept(sockfd, (struct sockaddr*)&clientaddr, &len);
-		//if(clientsocket == -1)
-		//{
-		//	fprintf(stderr, "could not accept client connection...\n");
-		//	exit(1);
-		//}
-		//printf("connection established...\n");
-		
-		//get file size
-		memset(filename, 0, 20);
-        //recv(clientsocket, filename, sizeof(filename), 0);
-		recv(sockfd, filename, sizeof(filename), 0);
-		printf("Received: %s\n", filename);
+    int len = sizeof(struct sockaddr_in);
+		memset(buf, 0, sizeof(buf));
+    //recv(clientsocket, filename, sizeof(filename), 0);
+		recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr*)&serveraddr, &len);
+    //buf[strlen(buf)-1] = '\0';
+    char *filename = malloc(strlen(buf));
+    memcpy(filename, buf, strlen(buf));
+    printf("Received: %s\n", filename);
 		if((fp = fopen(filename, "r")) == NULL)
 		{
 			printf("file not found\n");
+      exit(1);
 		}
 		printf("file %s found\n", filename);
 		int size;
@@ -68,22 +66,24 @@ int main(int argc, char **argv)
 		size = ftell(fp);
 		fseek(fp, 0, SEEK_SET);
 		printf("file size: %i\n", size);
-		
+
 		//send file size
 		printf("sending file size...\n");
-		write(sockfd, &size, sizeof(size));
-		
+		sendto(sockfd, &size, sizeof(size), 0, (struct sockaddr*)&serveraddr, sizeof(struct sockaddr_in));
+
 		//Send file as array of bytes
 		printf("sending picture as byte array\n");
 		char buff[size];
-		while(!feof(fp)) 
+		while(!feof(fp))
 		{
 			fread(buff, 1, sizeof(buff), fp);
-			write(clientsocket, buff, sizeof(buff));
-			bzero(buff, sizeof(buff));
+			sendto(sockfd, buff, sizeof(buff), 0, (struct sockaddr*)&serveraddr, sizeof(struct sockaddr_in));
+      printf("Sent: %s\n", buff);
+      bzero(buff, sizeof(buff));
 		}
-		
-        close(sockfd);
-        printf("Connection closed\n");
+    char *end = "EOF";
+    sendto(sockfd, end, sizeof(end), 0, (struct sockaddr*)&serveraddr, sizeof(struct sockaddr_in));
+    printf("File sent successfully\n");
+    close(sockfd);
 		return 0;
 }
